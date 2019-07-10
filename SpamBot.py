@@ -3,38 +3,26 @@ import imaplib
 import email
 import sys
 import getpass
+import re
 
 # class to madle the manipulation of the email account.
+pattern_uid = re.compile('\d+ \(UID (?P<uid>\d+)\)')
 
-
-class MailBox:
-	def __init__(self):
-		self.mailbox = imaplib.IMAP4_SSL("imap.gmail.com", 993)
-
-	def login(self, eAddr, ePass):
-		self.mailbox.login(eAddr, ePass)
-		self.mailbox.select('inbox')
-
-	def getEmails(self):
-		# get the current emails in the inbox.
-		retcode, data = self.mailbox.search(None, 'ALL')
-		if retcode != "OK":
-			return (1, None)
-		msgids = data[0].split()
-		for mid in msgids:
-			typ, data = self.mailbox.fetch(mid, '(RFC822)')
-			if typ != "OK":
-				print("not ok");
-			for response_part in data:
-				print(response_part)
+class email_data:
+	def __init__(self, mid, dest, send, subj, data):
+		self.mid = mid
+		self.dest = dest 
+		self.send = send
+		self.subj = subj
+		self.data = self.parse_email(data)
+	def getid(self):
+		return self.mid
+	def get_text(self):
+		return self.data
 	
-	def moveEmails(self, loc):
-		# function for moving the emails arround.
-		pass
-		
-	def logout(self):
-		self.mailbox.close()
-		self.mailbox.logout()
+	def parse_email(self, data):
+		#TODO Implement this 
+		return data; 
 
 
 # ********************************************************************************************
@@ -59,21 +47,22 @@ class Inbox_Handler:
 	def login(self, e_address):
 		e_pass = getpass.getpass()
 		self.mailbox.login(e_address,e_pass)
-		self.mailbox.select('inbox')
+		self.mailbox.select('inbox', readonly = False)
 		
-	def get_emails(self):
+	def get_emails(self, ammount = -1):
 		retcode, data = self.mailbox.search(None, 'ALL')
 		if retcode != "OK":
 			print("Error: unable get emails -> ", retcode)
 			return None
 		msgids = data[0].split()
 		
-		# TODO 
-		# remove the following line. Debugin line added for testing purposes. 
-		msgids = msgids[0:1]
-		
-		
-		emails = [] 
+		# this bit was really added more so we could limit the ammount we read for testing, 
+		# but can allos be used in practice so i am not complaining 
+		# spectifiying ammount limits the ammount of emails it reads, defaults to all of them
+		msgids = msgids[:ammount]
+		print(len(msgids))
+			
+		found = [] 
 		
 		for mid in msgids:
 			typ, data = self.mailbox.fetch(mid, '(RFC822)' )
@@ -89,16 +78,20 @@ class Inbox_Handler:
 					email_To = msg['To']
 					email_subject = msg['subject']
 					email_from = msg['from']
+					
 					email_body  = " "
 					count = 0
 					for part in msg.walk():
 						count += 1
 						if part.get_content_type() == "text/plain":
 							body = part.get_payload(decode=True)
-							print(body)
-							email_body += body 
-					email = ["ID":mid, "To":email_To, "sub":email_subject, "from":email_from, "body":email_body]
-					emails.append(email)
+							try :
+								email_body += body.decode("utf-8")
+							except :
+								#print(body)
+								pass
+								
+					found.append(email_data(mid,email_To,email_from,email_subject,email_body))
 					
 					
 					#keys = msg. keys()
@@ -117,38 +110,23 @@ class Inbox_Handler:
 					# https://docs.python.org/3/library/email.message.html
 					
 					#print("the content : ", msg.get_body())
+		return found
 		
 	
 	# https://stackoverflow.com/questions/3527933/move-an-email-in-gmail-with-python-and-imaplib 
 	def move_to_spam(self, email):
 		# get the UID for the email. 
-		err, data = imap.fetch(email["ID"], "(UID)")
+		err, data = self.mailbox.fetch(email.getid(), "(UID)")
 		if err != 'OK' :
 			print("Error: unable to fine email, not moved")
 			return 0
-		uid = pattern_uid.match(data).group('uid')
+		print(str(data[0], 'utf-8'))
+		uid = pattern_uid.match(str(data[0], 'utf-8')).group('uid')
 		
-		err, _ = imap.uid('MOVE', uid, '(\Spam)')
+		err, _ = self.mailbox.uid('MOVE', uid, '[Gmail]/Spam')
 		if err != 'OK':
 			print("Error: failed to move email to spam")
 			return 0
-		
-		
-		# alternate approach
-		
-		# Copy the email to the spam follder. 
-		#err, _ = imap.uid('COPY', uid, '(\Spam)')
-		#if err != 'OK':
-		#	print("Error: failed to move email to spam")
-		#	return 0
-		
-		# remove the email from the gmail. 
-		#err, _ = imap.uid('STORE', msg_uid , '+FLAGS', '(\Deleted)')
-		#if err != 'OK' :
-		#	print("Error: failed to deleet from imbox")
-		#	return 0
-        #imap.expunge()	
-        
         
 		return 1 #sucess 
 		
@@ -170,7 +148,12 @@ if __name__ == "__main__":
 	myMailBox.login(emailAddr)
 
 	# TODO insert Functionality in here 
-	myMailBox.get_emails()
+	my_emails = myMailBox.get_emails(5)
+	for e in my_emails:
+		print("\n\n start *********** \n",e.get_text())
+	#myMailBox.move_to_spam(my_emails[1])
+	
+	print(" the number of emails : ",len(my_emails))
 	
 	myMailBox.logout()
 	# print("Spam Filtering Commpleet !!!")
