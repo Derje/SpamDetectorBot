@@ -4,21 +4,33 @@ import email
 import sys
 import getpass
 import re
+import string
 from bs4 import BeautifulSoup
 
-# class to madle the manipulation of the email account.
 pattern_uid = re.compile('\d+ \(UID (?P<uid>\d+)\)')
 
+punctation_translator = str.maketrans(string.punctuation.replace("'",""), ' '*(len(string.punctuation)-1))
 
+#************************************************************************************************
+# email_data:
+#    class for storing the information (featchers) of a particular email.
+#    this class also handles proforming varius test on the email data to extract featchers. 
+#            
+#    __init__(self, mid, dest, send, subj, text, html, parts) :  creates an email objects onaly keep whats relivant
+#    ../
+#                          
+#
+#
 class email_data:
     def __init__(self, mid, dest, send, subj, text, html, parts):
         self.mid = mid
         self.dest = dest
         self.send = send
-        self.subj = subj
+        self.subj = self.parse_email(subj)
         self.text = self.parse_email(text)
         self.filter_html(html)
         self.parts = parts
+        
 
     def getid(self):
         return self.mid
@@ -32,16 +44,61 @@ class email_data:
     def filter_html(self, html):
     	soup = BeautifulSoup(html, features="html.parser")
     	self.links = []
-    	for link in soup.findAll('a', attrs={'href': re.compile("^http://")}, href=True):
+    	for link in soup.findAll('a', attrs={'href': re.compile("^http(s)://")}, href=True):
     		self.links.append(link.get('href'))
     	self.img_count = len(soup.findAll('img'))
+    	# remove the duplicets
+    	self.links = set(self.links)
+    	
+    	#https://stackoverflow.com/questions/39582787/unable-to-find-all-links-with-beautifulsoup-to-extract-links-from-a-website-lin
+    	#https://pythonspot.com/extract-links-from-webpage-beautifulsoup/
+    	#https://www.pythonforbeginners.com/beautifulsoup/beautifulsoup-4-python
+    	#https://www.digitalocean.com/community/tutorials/how-to-work-with-web-data-using-requests-and-beautiful-soup-with-python-3
+    	#https://www.digitalocean.com/community/tutorials/how-to-scrape-web-pages-with-beautiful-soup-and-python-3 
+    	#https://www.crummy.com/software/BeautifulSoup/bs3/documentation.html
 
     def parse_email(self, text):
-    	return text.replace('\n', '').replace('\t', '')
+    	# remove any special charicteres from the string
+    	line = ""
+    	for c in text:
+    		if ord(c)>31 and ord(c)<126:
+    			line += c
+    		else :
+    			line += " "
+    	#line = ''.join(c for c in text if ord(c)>31 and ord(c)<126)
+    	line = re.sub('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', ' ',line,flags=re.MULTILINE)
+    	
+    	return re.sub(' +', ' ',line.translate(punctation_translator))
+    	#return re.sub(r'https?:\/\/.*[\r\n]*', '', line, flags=re.MULTILINE)
+    	#https://stackoverflow.com/questions/20183669/remove-formatting-from-strings
+    	#https://stackoverflow.com/questions/9347419/python-strip-with-n
 
     def to_string(self):
-    	return "Email "+str(self.mid)+" subject: "+self.subj+" from: "+self.send+" #images = "+str(self.img_count)+" #links = "+str(len(self.links))
+    	return "Email:"+str(self.mid,'utf-8')+"\nSubject: "+self.subj+\
+    	"\nfrom: "+self.send+" To: "+self.dest+"\n#images:"+str(self.get_imgs_n())+" #links:"+str(self.get_link_n())+\
+    	" parts:"+(" Text" if self.parts[0] == 1 else "")+(" HTML" if self.parts[1] == 1 else "")+"\n"+\
+    	self.get_text()
+    
+    def short_string(self):
+    	return "Email:"+str(self.mid,'utf-8')+"\nSubject: "+self.subj+\
+    	"\nfrom: "+self.send+" To: "+self.dest+"\n#images:"+str(self.get_imgs_n())+" #links:"+str(self.get_link_n())+\
+    	" parts:"+(" Text" if self.parts[0] == 1 else "")+(" HTML" if self.parts[1] == 1 else "")+"\n"
+    
+    def get_imgs_n(self):
+    	return self.img_count
+    	
+    def get_link_n(self):
+    	return len(self.links)
+    	
+    def multi_lingle(self):
+    	return (1 if 'utf 8' in self.subj else 0)
+    	# https://ncona.com/2011/06/using-utf-8-characters-on-an-e-mail-subject/ 
+    
+    def get_sender(self):
+   		return self.send
 
+    	
+# ********************************************************************************************
 
 # ********************************************************************************************
 # Inbox_Handler:
@@ -52,7 +109,9 @@ class email_data:
 #
 #     login(e_address) ->  : login this hanndler into specified email account.
 #
-#     get_emails() -> [email] : retrive the emails currently in inbox.
+#     get_emails(ammount) -> [email] : retrive the emails currently in inbox. 
+#                                      if ammount is specified in will onaly read in that many 
+#                                      emails, else it will read in all the emails from the inbox. 
 #
 #     move_to_spam(email) ->  : move a specified email to the spam follder
 #
@@ -74,9 +133,9 @@ class Inbox_Handler:
             return None
         msgids = data[0].split()
 
-        # this bit was really added more so we could limit the ammount we read for testing,
-        # but can allos be used in practice so i am not complaining
-        # spectifiying ammount limits the ammount of emails it reads, defaults to all of them
+        # Sets The ammount of emails to read in. it cantake a long time to read in 
+        # the emails so this allows us to specify the number to read in. 
+        # TODO change this to read in <ammont> emails from the last email recived. 
         msgids = msgids[:ammount]
         print(len(msgids))
 
@@ -121,6 +180,8 @@ class Inbox_Handler:
                    
                     # https://stackoverflow.com/questions/3527933/move-an-email-in-gmail-with-python-and-imaplib
                     # https://docs.python.org/3/library/email.message.html
+                    # https://rails-bestpractices.com/posts/2010/08/05/use-multipart-alternative-as-content_type-of-email/
+                    # https://yuji.wordpress.com/2011/06/22/python-imaplib-imap-example-with-gmail/
 
         return found
 
@@ -139,6 +200,8 @@ class Inbox_Handler:
             print("Error: failed to move email to spam")
             return 0
 
+		# https://developers.google.com/gmail/imap/imap-extensions?csw=1#x-gm-labels
+
         return 1  # sucess
 
     def logout(self):
@@ -146,6 +209,25 @@ class Inbox_Handler:
         self.mailbox.logout()
 
 # *********************************************************************************************
+
+# *********************************************************************************************
+# spam_filter 
+#        is_subscribed(): checks if the emails is in a given list of subscribed senders who are
+#                         advertising but you whant to be included. 
+#
+class spam_filter:
+
+	def __init__(self):
+		pass
+	
+	def is_subscribed(self, email):
+		#TODO check if get_sender() is located in the list. 
+		pass
+	
+	
+	
+#
+#**********************************************************************************************
 
 
 if __name__ == "__main__":
@@ -157,11 +239,10 @@ if __name__ == "__main__":
     myMailBox.login(emailAddr)
 
     # TODO insert Functionality in here
-    my_emails = myMailBox.get_emails(4)
+    my_emails = myMailBox.get_emails(5)
     for e in my_emails:
-    	print("\n",e.to_string(),"\n")
-    # print("\n\n start *********** \n subject: ",e.get_sub(),"\n",e.get_text())
-    # myMailBox.move_to_spam(my_emails[1])
-    # print(" the number of emails : ",len(my_emails))
+    	print("\n",e.short_string()," \n")
+    # how to move an email to spam myMailBox.move_to_spam(my_emails[1])
+    
     myMailBox.logout()
-    # print("Spam Filtering Commpleet !!!")
+    
